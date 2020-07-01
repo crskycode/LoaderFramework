@@ -13,13 +13,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     if (GetLastError() != ERROR_SUCCESS)
         return 1;
 
-    if (PathCchRemoveFileSpec(szDirPath, ARRAYSIZE(szDirPath)) != S_OK)
+    if (FAILED(PathCchRemoveFileSpec(szDirPath, ARRAYSIZE(szDirPath))))
         return 1;
 
-    if (PathCchAddBackslash(szDirPath, ARRAYSIZE(szDirPath)) != S_OK)
+    if (FAILED(PathCchAddBackslash(szDirPath, ARRAYSIZE(szDirPath))))
         return 1;
 
-    if (PathCchCombine(szAppPath, ARRAYSIZE(szAppPath), szDirPath, L"akeiro.exe") != S_OK)
+    if (FAILED(PathCchCombine(szAppPath, ARRAYSIZE(szAppPath), szDirPath, L"akeiro.exe")))
         return 1;
 
     STARTUPINFOW startupInfo = { sizeof(startupInfo) };
@@ -29,5 +29,10 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     if (DetourCreateProcessWithDllsW(szAppPath, NULL, NULL, NULL, FALSE, NULL, NULL, szDirPath, &startupInfo, &processInfo, ARRAYSIZE(rgDlls), rgDlls, NULL) != TRUE)
         return 1;
 
-    return 0;
+    WaitForSingleObject(processInfo.hProcess, INFINITE);
+
+    DWORD exitCode;
+    GetExitCodeProcess(processInfo.hProcess, &exitCode);
+
+    return exitCode;
 }

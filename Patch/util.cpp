@@ -69,33 +69,27 @@ DWORD GetModuleSize(HMODULE hModule)
 }
 
 
-PVOID SearchPattern(PVOID lpStartAddr, DWORD dwSearchLen, PCSTR lpPattren, DWORD dwPatternLen)
+ULONG SearchSignature(ULONG SearchAddress, ULONG SearchLength, PCSTR Signature, ULONG SignatureLength)
 {
-    DWORD_PTR dwStartAddr = (DWORD_PTR)lpStartAddr;
-    DWORD_PTR dwEndAddr = dwStartAddr + dwSearchLen - dwPatternLen;
+    auto s1 = reinterpret_cast<std::string_view::const_pointer>(SearchAddress);
+    auto n1 = static_cast<std::string_view::size_type>(SearchLength);
+    auto s2 = reinterpret_cast<std::string_view::const_pointer>(Signature);
+    auto n2 = static_cast<std::string_view::size_type>(SignatureLength);
 
-    while (dwStartAddr < dwEndAddr)
+    std::string_view v1(s1, n1);
+    std::string_view v2(s1, n2);
+
+    auto pred = [](auto a, auto b) -> bool
     {
-        BOOL bFound = TRUE;
+        return (b == 0x2a) || (a == b);
+    };
 
-        for (DWORD i = 0; i < dwPatternLen; i++)
-        {
-            CHAR code = *(PCHAR)(dwStartAddr + i);
+    auto it = std::search(v1.begin(), v1.end(), v2.begin(), v2.end(), pred);
 
-            if (lpPattren[i] != 0x2A && lpPattren[i] != code)
-            {
-                bFound = FALSE;
-                break;
-            }
-        }
+    if (it == v1.end())
+        return NULL;
 
-        if (bFound)
-            return (PVOID)dwStartAddr;
-
-        dwStartAddr++;
-    }
-
-    return NULL;
+    return it - v1.begin() + SearchAddress;
 }
 
 
@@ -112,10 +106,14 @@ void PatchRead(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize)
         CopyMemory(lpBuf, lpAddr, nSize);
         VirtualProtect(lpAddr, nSize, dwProtect, &dwProtect);
     }
+    else
+    {
+        FatalError("Failed to modify protection at %08X !", lpAddr);
+    }
 }
 
 
-void PatchWrite(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize)
+void PatchWrite(LPVOID lpAddr, LPCVOID lpBuf, DWORD nSize)
 {
     DWORD dwProtect;
     if (VirtualProtect(lpAddr, nSize, PAGE_EXECUTE_READWRITE, &dwProtect))
@@ -123,6 +121,103 @@ void PatchWrite(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize)
         CopyMemory(lpAddr, lpBuf, nSize);
         VirtualProtect(lpAddr, nSize, dwProtect, &dwProtect);
     }
+    else
+    {
+        FatalError("Failed to modify protection at %08X !", lpAddr);
+    }
+}
+
+
+void PatchNop(LPVOID lpAddr, int nCount)
+{
+    DWORD dwProtect;
+    if (VirtualProtect(lpAddr, nCount, PAGE_EXECUTE_READWRITE, &dwProtect))
+    {
+        memset(lpAddr, 0x90, nCount);
+        VirtualProtect(lpAddr, nCount, dwProtect, &dwProtect);
+    }
+    else
+    {
+        FatalError("Failed to modify protection at %08X !", lpAddr);
+    }
+}
+
+
+//=============================================================================
+// Hook Helper
+//=============================================================================
+
+
+static inline PBYTE RvaAdjust(_Pre_notnull_ PIMAGE_DOS_HEADER pDosHeader, _In_ DWORD raddr)
+{
+    if (raddr != NULL) {
+        return ((PBYTE)pDosHeader) + raddr;
+    }
+    return NULL;
+}
+
+
+BOOL IATHook(HMODULE hModule, PCSTR pszFileName, PCSTR pszProcName, PVOID pNewProc)
+{
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hModule;
+
+    if (hModule == NULL)
+        pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleW(NULL);
+
+    if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        return FALSE;
+
+    PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)((PBYTE)pDosHeader + pDosHeader->e_lfanew);
+
+    if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
+        return FALSE;
+
+    if (pNtHeader->FileHeader.SizeOfOptionalHeader == 0)
+        return FALSE;
+
+    PIMAGE_IMPORT_DESCRIPTOR iidp = (PIMAGE_IMPORT_DESCRIPTOR)RvaAdjust(pDosHeader, pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+    if (iidp == NULL)
+        return FALSE;
+
+    for (; iidp->OriginalFirstThunk != 0; iidp++)
+    {
+        PCSTR pszName = (PCHAR)RvaAdjust(pDosHeader, iidp->Name);
+
+        if (pszName == NULL)
+            return FALSE;
+
+        if (_stricmp(pszName, pszFileName) != 0)
+            continue;
+
+        PIMAGE_THUNK_DATA pThunks = (PIMAGE_THUNK_DATA)RvaAdjust(pDosHeader, iidp->OriginalFirstThunk);
+        PVOID* pAddrs = (PVOID*)RvaAdjust(pDosHeader, iidp->FirstThunk);
+
+        if (pThunks == NULL)
+            continue;
+
+        for (DWORD nNames = 0; pThunks[nNames].u1.Ordinal; nNames++)
+        {
+            DWORD nOrdinal = 0;
+            PCSTR pszFunc = NULL;
+
+            if (IMAGE_SNAP_BY_ORDINAL(pThunks[nNames].u1.Ordinal))
+                nOrdinal = (DWORD)IMAGE_ORDINAL(pThunks[nNames].u1.Ordinal);
+            else
+                pszFunc = (PCSTR)RvaAdjust(pDosHeader, (DWORD)pThunks[nNames].u1.AddressOfData + 2);
+
+            if (pszFunc == NULL)
+                continue;
+
+            if (strcmp(pszFunc, pszProcName) != 0)
+                continue;
+
+            PatchWrite(&pAddrs[nNames], pNewProc);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
 }
 
 
@@ -173,23 +268,198 @@ CStringA Ucs2ToUtf8(const CStringW& str)
 
 CStringW ShiftJisToUcs2(const CStringA& str)
 {
-    return AnsiToUcs2(932, str);
+    return AnsiToUcs2(CP_SHIFTJIS, str);
 }
 
 
 CStringA Ucs2ToShiftJis(const CStringW& str)
 {
-    return Ucs2ToAnsi(932, str);
+    return Ucs2ToAnsi(CP_SHIFTJIS, str);
 }
 
 
 CStringW GbkToUcs2(const CStringA& str)
 {
-    return AnsiToUcs2(936, str);
+    return AnsiToUcs2(CP_GBK, str);
 }
 
 
 CStringA Ucs2ToGbk(const CStringW& str)
 {
-    return Ucs2ToAnsi(936, str);
+    return Ucs2ToAnsi(CP_GBK, str);
 }
+
+
+//=============================================================================
+// File & Path
+//=============================================================================
+
+
+CPathA GetAppDirectoryA()
+{
+    CHAR szPath[MAX_PATH];
+    GetModuleFileNameA(GetModuleHandleA(NULL), szPath, ARRAYSIZE(szPath));
+    if (GetLastError() != ERROR_SUCCESS)
+        return CPathA();
+    CPathA ret(szPath);
+    if (ret.RemoveFileSpec() != TRUE)
+        return CPathA();
+    return ret;
+}
+
+
+CPathW GetAppDirectoryW()
+{
+    WCHAR szPath[MAX_PATH];
+    GetModuleFileNameW(GetModuleHandleW(NULL), szPath, ARRAYSIZE(szPath));
+    if (GetLastError() != ERROR_SUCCESS)
+        return CPathW();
+    CPathW ret(szPath);
+    if (ret.RemoveFileSpec() != TRUE)
+        return CPathW();
+    return ret;
+}
+
+
+CPathA GetAppPathA()
+{
+    CHAR szPath[MAX_PATH];
+    GetModuleFileNameA(GetModuleHandleA(NULL), szPath, ARRAYSIZE(szPath));
+    if (GetLastError() != ERROR_SUCCESS)
+        return CPathA();
+    return CPathA(szPath);
+}
+
+
+CPathW GetAppPathW()
+{
+    WCHAR szPath[MAX_PATH];
+    GetModuleFileNameW(GetModuleHandleW(NULL), szPath, ARRAYSIZE(szPath));
+    if (GetLastError() != ERROR_SUCCESS)
+        return CPathW();
+    return CPathW(szPath);
+}
+
+
+//=============================================================================
+// Error Handling
+//=============================================================================
+
+
+__declspec(noreturn) void FatalError(LPCSTR lpMessage, ...)
+{
+    CStringA strMsg;
+    va_list args;
+
+    va_start(args, lpMessage);
+    strMsg.FormatV(lpMessage, args);
+    va_end(args);
+
+    MessageBoxA(GetActiveWindow(), strMsg, "Fatal Error", MB_OK | MB_ICONERROR);
+    ExitProcess(1);
+}
+
+
+__declspec(noreturn) void FatalError(LPCWSTR lpMessage, ...)
+{
+    CStringW strMsg;
+    va_list args;
+
+    va_start(args, lpMessage);
+    strMsg.FormatV(lpMessage, args);
+    va_end(args);
+
+    MessageBoxW(GetActiveWindow(), strMsg, L"Fatal Error", MB_OK | MB_ICONERROR);
+    ExitProcess(1);
+}
+
+
+//=============================================================================
+// PE Helper
+//=============================================================================
+
+
+PIMAGE_SECTION_HEADER FindSectionFromModule(HMODULE hModule, PCSTR pName)
+{
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hModule;
+
+    if (hModule == NULL)
+        pDosHeader = (PIMAGE_DOS_HEADER)GetModuleHandleW(NULL);
+
+    if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        return NULL;
+
+    PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)((PBYTE)pDosHeader + pDosHeader->e_lfanew);
+
+    if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
+        return NULL;
+
+    if (pNtHeader->FileHeader.SizeOfOptionalHeader == 0)
+        return NULL;
+
+    PIMAGE_SECTION_HEADER pSectionHeaders = (PIMAGE_SECTION_HEADER)((PBYTE)pNtHeader + sizeof(pNtHeader->Signature) + sizeof(pNtHeader->FileHeader) + pNtHeader->FileHeader.SizeOfOptionalHeader);
+
+    for (DWORD n = 0; n < pNtHeader->FileHeader.NumberOfSections; n++)
+    {
+        if (strcmp((PCHAR)pSectionHeaders[n].Name, pName) == 0)
+        {
+            if (pSectionHeaders[n].VirtualAddress == 0 || pSectionHeaders[n].SizeOfRawData == 0)
+                return NULL;
+
+            return &pSectionHeaders[n];
+        }
+    }
+
+    return NULL;
+}
+
+
+//=============================================================================
+// GUI
+//=============================================================================
+
+
+#ifdef _UNICODE
+#if defined _M_IX86
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='x86' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#elif defined _M_X64
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#else
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
+#endif
+
+
+static HANDLE ActCtx = INVALID_HANDLE_VALUE;
+static ULONG_PTR ActCookie = 0;
+
+void InitComCtl(HMODULE hModule)
+{
+    if (ActCtx != INVALID_HANDLE_VALUE)
+        return;
+
+    ACTCTXW ctx = {};
+    ctx.cbSize = sizeof(ctx);
+    ctx.dwFlags = ACTCTX_FLAG_HMODULE_VALID | ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    ctx.lpResourceName = MAKEINTRESOURCEW(2);
+    ctx.hModule = hModule;
+    // This sample implies your DLL stores Common Controls version 6.0 manifest in its resources with ID 2.
+
+    ActCtx = CreateActCtxW(&ctx);
+
+    if (ActCtx == INVALID_HANDLE_VALUE)
+        return;
+
+    ActivateActCtx(ActCtx, &ActCookie);
+}
+
+
+void ReleaseComCtl()
+{
+    if (ActCtx == INVALID_HANDLE_VALUE)
+        return;
+
+    DeactivateActCtx(0, ActCookie);
+    ReleaseActCtx(ActCtx);
+}
+

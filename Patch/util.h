@@ -11,10 +11,12 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shlobj.h>
 #include <intrin.h>
 #include <pathcch.h>
 #include <strsafe.h>
 #include <atlstr.h>
+#include <atlpath.h>
 #include <atlfile.h>
 
 
@@ -36,10 +38,14 @@ using std::remove_if;
 using std::remove_copy_if;
 
 
+#include <string_view>
+using std::string_view;
+
 #include <string>
 using std::string;
 using std::wstring;
 
+#include <functional>
 
 #include <memory>
 using std::shared_ptr;
@@ -85,7 +91,10 @@ void LogWrite(LPCWSTR lpMessage, ...);
 
 PVOID GetModuleBase(HMODULE hModule);
 DWORD GetModuleSize(HMODULE hModule);
-PVOID SearchPattern(PVOID lpStartAddr, DWORD dwSearchLen, PCSTR lpPattren, DWORD dwPatternLen);
+ULONG SearchSignature(ULONG SearchAddress, ULONG SearchLength, PCSTR Signature, ULONG SignatureLength);
+
+template<class T>
+constexpr ULONG sizeofsig(const T& x) { return sizeof(x) - 1; }
 
 
 //=============================================================================
@@ -94,7 +103,10 @@ PVOID SearchPattern(PVOID lpStartAddr, DWORD dwSearchLen, PCSTR lpPattren, DWORD
 
 
 void PatchRead(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize);
-void PatchWrite(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize);
+void PatchWrite(LPVOID lpAddr, LPCVOID lpBuf, DWORD nSize);
+
+
+void PatchNop(LPVOID lpAddr, int nCount);
 
 
 template<class T>
@@ -108,6 +120,25 @@ template<class T>
 void PatchWrite(LPVOID lpAddr, T&& lpBuf)
 {
     PatchWrite(lpAddr, &lpBuf, sizeof(T));
+}
+
+
+//=============================================================================
+// Memory Address Helper
+//=============================================================================
+
+
+template<class T = DWORD_PTR>
+inline constexpr DWORD_PTR MakeRVA(T base, DWORD_PTR va)
+{
+    return (DWORD_PTR)((DWORD_PTR)va - (DWORD_PTR)base);
+}
+
+
+template<class T = DWORD_PTR>
+inline constexpr PVOID MakeVA(T base, DWORD_PTR rva)
+{
+    return (PVOID)((DWORD_PTR)base + (DWORD_PTR)rva);
 }
 
 
@@ -135,10 +166,16 @@ void UnInlineHook(T& OriginalFunction, T DetourFunction)
     DetourTransactionCommit();
 }
 
+BOOL IATHook(HMODULE hModule, PCSTR pszFileName, PCSTR pszProcName, PVOID pNewProc);
+
 
 //=============================================================================
 // Encoding
 //=============================================================================
+
+
+#define CP_SHIFTJIS 932
+#define CP_GBK 936
 
 
 CStringW AnsiToUcs2(int cp, const CStringA& str);
@@ -149,3 +186,40 @@ CStringW ShiftJisToUcs2(const CStringA& str);
 CStringA Ucs2ToShiftJis(const CStringW& str);
 CStringW GbkToUcs2(const CStringA& str);
 CStringA Ucs2ToGbk(const CStringW& str);
+
+
+//=============================================================================
+// File & Path
+//=============================================================================
+
+
+CPathA GetAppDirectoryA();
+CPathW GetAppDirectoryW();
+CPathA GetAppPathA();
+CPathW GetAppPathW();
+
+
+//=============================================================================
+// Error Handling
+//=============================================================================
+
+
+__declspec(noreturn) void FatalError(LPCSTR lpMessage, ...);
+__declspec(noreturn) void FatalError(LPCWSTR lpMessage, ...);
+
+
+//=============================================================================
+// PE Helper
+//=============================================================================
+
+
+PIMAGE_SECTION_HEADER FindSectionFromModule(HMODULE hModule, PCSTR pName);
+
+
+//=============================================================================
+// GUI
+//=============================================================================
+
+
+void InitComCtl(HMODULE hModule);
+void ReleaseComCtl();
