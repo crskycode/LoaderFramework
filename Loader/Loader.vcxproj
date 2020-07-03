@@ -121,7 +121,7 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)ThirdParty\Detours\$(Configuration)_$(PlatformShortName)</AdditionalLibraryDirectories>
       <AdditionalDependencies>pathcch.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -157,7 +157,7 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)ThirdParty\Detours\$(Configuration)_$(PlatformShortName)</AdditionalLibraryDirectories>
       <AdditionalDependencies>pathcch.lib;detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
