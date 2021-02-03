@@ -26,6 +26,15 @@
 
 
 #include <detours.h>
+#include "util_detours.h"
+
+
+//=============================================================================
+// C Runtime Headers
+//=============================================================================
+
+
+#include <time.h>
 
 
 //=============================================================================
@@ -82,6 +91,8 @@ using std::set;
 void LogInit(LPCWSTR lpFileName);
 void LogWrite(LPCSTR lpMessage, ...);
 void LogWrite(LPCWSTR lpMessage, ...);
+void LogWriteLine(LPCSTR lpMessage, ...);
+void LogWriteLine(LPCWSTR lpMessage, ...);
 
 
 //=============================================================================

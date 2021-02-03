@@ -14,6 +14,7 @@ static CAtlFile gLogFile;
 void LogInit(LPCWSTR lpFileName)
 {
     gLogFile.Create(lpFileName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_ALWAYS);
+    gLogFile.Seek(0, FILE_END);
 }
 
 
@@ -41,6 +42,56 @@ void LogWrite(LPCWSTR lpMessage, ...)
     va_start(args, lpMessage);
     str.FormatV(lpMessage, args);
     va_end(args);
+
+    CStringA utf = Ucs2ToUtf8(str);
+    gLogFile.Write(utf.GetString(), utf.GetLength());
+}
+
+
+void LogWriteLine(LPCSTR lpMessage, ...)
+{
+    CStringA str;
+    va_list args;
+
+    time_t t;
+    char tstr[32];
+    time(&t);
+    ctime_s(tstr, _countof(tstr), &t);
+
+    str.Append(tstr);
+    str.AppendChar(' ');
+
+    va_start(args, lpMessage);
+    str.AppendFormatV(lpMessage, args);
+    va_end(args);
+
+    str.Append("\r\n");
+
+    CStringW ucs = AnsiToUcs2(CP_ACP, str);
+    CStringA utf = Ucs2ToUtf8(ucs);
+
+    gLogFile.Write(utf.GetString(), utf.GetLength());
+}
+
+
+void LogWriteLine(LPCWSTR lpMessage, ...)
+{
+    CStringW str;
+    va_list args;
+
+    time_t t;
+    wchar_t tstr[32];
+    time(&t);
+    _wctime_s(tstr, _countof(tstr), &t);
+
+    str.Append(tstr);
+    str.AppendChar(L' ');
+
+    va_start(args, lpMessage);
+    str.AppendFormatV(lpMessage, args);
+    va_end(args);
+
+    str.Append(L"\r\n");
 
     CStringA utf = Ucs2ToUtf8(str);
     gLogFile.Write(utf.GetString(), utf.GetLength());
