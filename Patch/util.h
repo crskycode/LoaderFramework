@@ -16,7 +16,12 @@
 #include <pathcch.h>
 #include <strsafe.h>
 #include <atlstr.h>
+
+#pragma warning(push)
+#pragma warning(disable:4995)
 #include <atlpath.h>
+#pragma warning(pop)
+
 #include <atlfile.h>
 
 
