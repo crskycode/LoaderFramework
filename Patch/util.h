@@ -89,6 +89,15 @@ using std::set;
 
 
 //=============================================================================
+// Error Handling
+//=============================================================================
+
+
+__declspec(noreturn) void FatalError(LPCSTR lpMessage, ...);
+__declspec(noreturn) void FatalError(LPCWSTR lpMessage, ...);
+
+
+//=============================================================================
 // Logger
 //=============================================================================
 
@@ -128,6 +137,7 @@ void PatchNop(LPVOID lpAddr, int nCount);
 template<class T>
 void PatchRead(LPVOID lpAddr, T& lpBuf)
 {
+    _ASSERT(lpAddr != NULL);
     PatchRead(lpAddr, &lpBuf, sizeof(T));
 }
 
@@ -135,8 +145,21 @@ void PatchRead(LPVOID lpAddr, T& lpBuf)
 template<class T>
 void PatchWrite(LPVOID lpAddr, T&& lpBuf)
 {
+    _ASSERT(lpAddr != NULL);
     PatchWrite(lpAddr, &lpBuf, sizeof(T));
 }
+
+
+void PatchWriteStringA(LPVOID lpAddr, LPCSTR lpBuf);
+void PatchWriteStringW(LPVOID lpAddr, LPCWSTR lpBuf);
+
+
+//=============================================================================
+// String Helper
+//=============================================================================
+
+
+void ConvertStringCodePage(LPSTR lpBuf, int srcCP, int dstCP, LPCCH defChar);
 
 
 //=============================================================================
@@ -195,7 +218,7 @@ BOOL IATHook(HMODULE hModule, PCSTR pszFileName, PCSTR pszProcName, PVOID pNewPr
 
 
 CStringW AnsiToUcs2(int cp, const CStringA& str);
-CStringA Ucs2ToAnsi(int cp, const CStringW& str);
+CStringA Ucs2ToAnsi(int cp, const CStringW& str, LPCCH defChar);
 CStringW Utf8ToUcs2(const CStringA& str);
 CStringA Ucs2ToUtf8(const CStringW& str);
 CStringW ShiftJisToUcs2(const CStringA& str);
@@ -213,15 +236,6 @@ CPathA GetAppDirectoryA();
 CPathW GetAppDirectoryW();
 CPathA GetAppPathA();
 CPathW GetAppPathW();
-
-
-//=============================================================================
-// Error Handling
-//=============================================================================
-
-
-__declspec(noreturn) void FatalError(LPCSTR lpMessage, ...);
-__declspec(noreturn) void FatalError(LPCWSTR lpMessage, ...);
 
 
 //=============================================================================

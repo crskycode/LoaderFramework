@@ -151,6 +151,10 @@ ULONG SearchSignature(ULONG SearchAddress, ULONG SearchLength, PCSTR Signature, 
 
 void PatchRead(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize)
 {
+    _ASSERT(lpAddr != NULL);
+    _ASSERT(lpBuf != NULL);
+    _ASSERT(nSize != 0);
+
     DWORD dwProtect;
     if (VirtualProtect(lpAddr, nSize, PAGE_EXECUTE_READWRITE, &dwProtect))
     {
@@ -166,6 +170,10 @@ void PatchRead(LPVOID lpAddr, LPVOID lpBuf, DWORD nSize)
 
 void PatchWrite(LPVOID lpAddr, LPCVOID lpBuf, DWORD nSize)
 {
+    _ASSERT(lpAddr != NULL);
+    _ASSERT(lpBuf != NULL);
+    _ASSERT(nSize != 0);
+
     DWORD dwProtect;
     if (VirtualProtect(lpAddr, nSize, PAGE_EXECUTE_READWRITE, &dwProtect))
     {
@@ -181,6 +189,9 @@ void PatchWrite(LPVOID lpAddr, LPCVOID lpBuf, DWORD nSize)
 
 void PatchNop(LPVOID lpAddr, int nCount)
 {
+    _ASSERT(lpAddr != NULL);
+    _ASSERT(nCount != 0);
+
     DWORD dwProtect;
     if (VirtualProtect(lpAddr, nCount, PAGE_EXECUTE_READWRITE, &dwProtect))
     {
@@ -191,6 +202,32 @@ void PatchNop(LPVOID lpAddr, int nCount)
     {
         FatalError("Failed to modify protection at %08X !", lpAddr);
     }
+}
+
+
+void PatchWriteStringA(LPVOID lpAddr, LPCSTR lpBuf)
+{
+    _ASSERT(lpAddr != NULL);
+    _ASSERT(lpBuf != NULL);
+    DWORD srcLen = strlen((LPCSTR)lpAddr);
+    DWORD newLen = strlen(lpBuf);
+    if (newLen > srcLen)
+        FatalError("PatchWriteStringA: No enough space.");
+    DWORD nSize = newLen + 1;
+    PatchWrite(lpAddr, lpBuf, nSize);
+}
+
+
+void PatchWriteStringW(LPVOID lpAddr, LPCWSTR lpBuf)
+{
+    _ASSERT(lpAddr != NULL);
+    _ASSERT(lpBuf != NULL);
+    DWORD srcLen = wcslen((LPCWSTR)lpAddr);
+    DWORD newLen = wcslen(lpBuf);
+    if (newLen > srcLen)
+        FatalError("PatchWriteStringW: No enough space.");
+    DWORD nSize = (newLen + 1) * sizeof(WCHAR);
+    PatchWrite(lpAddr, lpBuf, nSize);
 }
 
 
@@ -210,6 +247,10 @@ static inline PBYTE RvaAdjust(_Pre_notnull_ PIMAGE_DOS_HEADER pDosHeader, _In_ D
 
 BOOL IATHook(HMODULE hModule, PCSTR pszFileName, PCSTR pszProcName, PVOID pNewProc)
 {
+    _ASSERT(pszFileName != NULL);
+    _ASSERT(pszProcName != NULL);
+    _ASSERT(pNewProc != NULL);
+
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hModule;
 
     if (hModule == NULL)
@@ -291,7 +332,7 @@ CStringW AnsiToUcs2(int cp, const CStringA& str)
 }
 
 
-CStringA Ucs2ToAnsi(int cp, const CStringW& str)
+CStringA Ucs2ToAnsi(int cp, const CStringW& str, LPCCH defChar)
 {
     if (str.GetLength() == 0)
         return CStringA();
@@ -299,7 +340,7 @@ CStringA Ucs2ToAnsi(int cp, const CStringW& str)
     if (nLen == 0)
         return CStringA();
     CStringA ret('\0', nLen);
-    if (WideCharToMultiByte(cp, 0, str.GetString(), str.GetLength(), ret.GetBuffer(), ret.GetAllocLength(), NULL, NULL) == 0)
+    if (WideCharToMultiByte(cp, 0, str.GetString(), str.GetLength(), ret.GetBuffer(), ret.GetAllocLength(), defChar, NULL) == 0)
         return CStringA();
     return ret;
 }
@@ -313,7 +354,7 @@ CStringW Utf8ToUcs2(const CStringA& str)
 
 CStringA Ucs2ToUtf8(const CStringW& str)
 {
-    return Ucs2ToAnsi(CP_UTF8, str);
+    return Ucs2ToAnsi(CP_UTF8, str, "?");
 }
 
 
@@ -325,7 +366,7 @@ CStringW ShiftJisToUcs2(const CStringA& str)
 
 CStringA Ucs2ToShiftJis(const CStringW& str)
 {
-    return Ucs2ToAnsi(CP_SHIFTJIS, str);
+    return Ucs2ToAnsi(CP_SHIFTJIS, str, "?");
 }
 
 
@@ -337,7 +378,21 @@ CStringW GbkToUcs2(const CStringA& str)
 
 CStringA Ucs2ToGbk(const CStringW& str)
 {
-    return Ucs2ToAnsi(CP_GBK, str);
+    return Ucs2ToAnsi(CP_GBK, str, "?");
+}
+
+
+//=============================================================================
+// String Helper
+//=============================================================================
+
+
+void ConvertStringCodePage(LPSTR lpBuf, int srcCP, int dstCP, LPCCH defChar)
+{
+    _ASSERT(lpBuf != NULL);
+    CStringW ucs = AnsiToUcs2(srcCP, lpBuf);
+    CStringA ansi = Ucs2ToAnsi(dstCP, ucs, defChar);
+    PatchWriteStringA(lpBuf, ansi);
 }
 
 
